@@ -1,0 +1,241 @@
+#include "framework.h"
+#include "FileRev.h"
+#include <Windows.h>
+#include <Windowsx.h>
+#include <string.h>
+#include <Commdlg.h>
+#include <string.h>
+#include <Shlwapi.h>
+#pragma comment(lib, "Shlwapi.lib")
+
+#define MAX_LOADSTRING 100
+
+HINSTANCE hInst;
+WCHAR szTitle[MAX_LOADSTRING] = TEXT("FileReverce");
+WCHAR szWindowClass[MAX_LOADSTRING];
+WCHAR fileName[MAX_LOADSTRING] = TEXT("FILEREV.DAT");
+HANDLE hFile;
+HANDLE hFileMap;
+LPVOID lpvFile;
+LPSTR  lpchANSI;
+DWORD  dwFileSize;
+LPSTR lpszCmdLineT;
+STARTUPINFO si;
+PROCESS_INFORMATION pi;
+
+ATOM MyRegisterClass(HINSTANCE hInstance);
+BOOL InitInstance(HINSTANCE, int);
+LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);
+
+int APIENTRY wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _In_ LPWSTR lpCmdLine, In_ int nCmdShow)
+{
+    UNREFERENCED_PARAMETER(hPrevInstance);
+    UNREFERENCED_PARAMETER(lpCmdLine);
+    LoadStringW(hInstance, IDS_APP_TITLE, szTitle, MAX_LOADSTRING);
+    LoadStringW(hInstance, IDC_MIACHYNAFILEREV, szWindowClass, MAX_LOADSTRING);
+    MyRegisterClass(hInstance);
+    if (!InitInstance(hInstance, nCmdShow)) { return FALSE; }
+    HACCEL hAccelTable = LoadAccelerators(hInstance, MAKEINTRESOURCE(IDC_MIACHYNAFILEREV));
+    MSG msg;
+    while (GetMessage(&msg, nullptr, 0, 0))
+    {
+        if (!TranslateAccelerator(msg.hwnd, hAccelTable, &msg))
+        {
+            TranslateMessage(&msg);
+            DispatchMessage(&msg);
+        }
+    }
+    return (int)msg.wParam;
+}
+
+ATOM MyRegisterClass(HINSTANCE hInstance)
+{
+    WNDCLASSEXW wcex;
+    wcex.cbSize = sizeof(WNDCLASSEX);
+    wcex.style = CS_HREDRAW | CS_VREDRAW;
+    wcex.lpfnWndProc = WndProc;
+    wcex.cbClsExtra = 0;
+    wcex.cbWndExtra = 0;
+    wcex.hInstance = hInstance;
+    wcex.hIcon = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_MIACHYNAFILEREV));
+    wcex.hCursor = LoadCursor(nullptr, IDC_ARROW);
+    wcex.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+    wcex.lpszMenuName = MAKEINTRESOURCEW(IDC_MIACHYNAFILEREV);
+    wcex.lpszClassName = szWindowClass;
+    wcex.hIconSm = LoadIcon(wcex.hInstance, MAKEINTRESOURCE(IDI_SMALL));
+    return RegisterClassExW(&wcex);
+}
+
+
+BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
+{
+    hInst = hInstance;
+    HWND hWnd = CreateWindowW(szWindowClass, szTitle, WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, 0, CW_USEDEFAULT, 0, nullptr, nullptr, hInstance, nullptr);
+    if (!hWnd) { return FALSE; }
+    ShowWindow(hWnd, nCmdShow);
+    UpdateWindow(hWnd);
+    return TRUE;
+}
+
+LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
+{
+    switch (message)
+    {
+    case WM_COMMAND:
+    {
+        TCHAR szFileName[MAX_PATH] = { 0 };
+        int wmId = LOWORD(wParam);
+        switch (wmId)
+        {
+        case IDM_FILE_SELECT:
+        {
+            OPENFILENAME ofn;
+            ZeroMemory(&ofn, sizeof(OPENFILENAME));
+            ofn.lStructSize = sizeof(OPENFILENAME);
+            ofn.hwndOwner = NULL;
+            ofn.lpstrFile = szFileName;
+            ofn.nMaxFile = sizeof(szFileName) / sizeof(*szFileName);
+            ofn.lpstrFilter = TEXT("All Files\0*.*\0Text Files\0*.TXT\0");
+            ofn.nFilterIndex = 1;
+            ofn.lpstrFileTitle = NULL;
+            ofn.nMaxFileTitle = 0;
+            ofn.lpstrInitialDir = NULL;
+            ofn.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST;
+            if (!GetOpenFileName(&ofn))
+            {
+                MessageBox(NULL, TEXT("ERROR!\nFile for conversion is not selected."), TEXT("FileRev"), MB_OK);
+                return(0);
+            }
+            if (CopyFile(szFileName, fileName, FALSE))
+            {
+                MessageBox(NULL, TEXT("New file successfully created!"), TEXT("FileRev"), MB_OK);
+            }
+            else
+            {
+                MessageBox(NULL, TEXT("ERROR!\nNew file cannot be created."), TEXT("FileRev"), MB_OK);
+                return (0);
+            }
+            hFile = CreateFile(fileName,
+                GENERIC_WRITE | GENERIC_READ,
+                NULL,
+                OPEN_EXISTING,
+                FILE_ATTRIBUTE_NORMAL,
+                NULL);
+            if (hFile == INVALID_HANDLE_VALUE)
+            {
+                MessageBox(NULL, TEXT("ERROR!\nFile failed to open."), TEXT("FileRev"), MB_OK);
+                return(0);
+            }
+        }
+        break;
+        case IDM_MAPFILE_CREATE:
+        {
+            dwFileSize = GetFileSize(hFile, NULL);
+            hFileMap = CreateFileMapping(
+                hFile,
+                NULL,
+                PAGE_READWRITE,
+                0,
+                dwFileSize + sizeof(WCHAR),
+                NULL);
+            if (hFileMap == NULL)
+            {
+                MessageBox(NULL, TEXT("ERROR!\nFailed to open MAP file."), TEXT("FileRev"), MB_OK);
+                CloseHandle(hFile);
+                return (0);
+            }
+            else
+            {
+                MessageBox(NULL, TEXT("MAP file successfully created!"), TEXT("FileRev"), MB_OK);
+            }
+        }
+        break;
+        case IDM_MAPFILE_OPEN:
+        {
+            TCHAR szFilePath[MAX_PATH];
+            GetFullPathName(fileName, MAX_PATH, szFilePath, nullptr);
+            if (!PathRemoveFileSpec(szFilePath))
+            {
+                MessageBox(NULL, TEXT("ERROR\nFailed to remove file name from path!"), TEXT("FileRev"), MB_OK | MB_ICONERROR);
+                return 0;
+            }
+            WCHAR CmdParam[MAX_LOADSTRING];
+            swprintf_s(CmdParam, TEXT("notepad.exe %s\\%s"), szFilePath, fileName);
+            si.cb = sizeof(si);
+            si.wShowWindow = SW_SHOW;
+            si.dwFlags = STARTF_USESHOWWINDOW;
+            if (CreateProcess(nullptr, CmdParam, nullptr, nullptr, FALSE, 0, nullptr, nullptr, &si, &pi))
+            {
+                CloseHandle(pi.hThread);
+                CloseHandle(pi.hProcess);
+            }
+        }
+        break;
+        case IDM_ADDRESSSPACE_SHOW:
+        {
+            lpvFile = MapViewOfFile(
+                hFileMap,
+                FILE_MAP_WRITE,
+                0,
+                0,
+                0);
+            if (lpvFile == NULL)
+            {
+                MessageBox(NULL, TEXT("ERROR!\nProjecting a windowed representation of a file failed."), TEXT("FileRev"), MB_OK);
+                CloseHandle(hFileMap);
+                CloseHandle(hFile);
+                return(0);
+            }
+            else
+            {
+                MessageBox(NULL, TEXT("The window view of the file has been successfully projected!"), TEXT("FileRev"), MB_OK);
+            }
+        }
+        break;
+        case IDM_ADDRESSSPACE_CLOSE:
+        {
+            UnmapViewOfFile(lpvFile);
+            CloseHandle(hFileMap);
+            SetFilePointer(hFile, dwFileSize, NULL, FILE_BEGIN);
+            SetEndOfFile(hFile);
+            CloseHandle(hFile);
+        }
+        break;
+        case IDM_CONVERSION_FLIP:
+        {
+            lpchANSI = (LPSTR)lpvFile;
+            lpchANSI[dwFileSize] = 0;
+            _strrev(lpchANSI);
+            lpchANSI = strchr(lpchANSI, (int)'\n');
+            while (lpchANSI != NULL)
+            {
+                *lpchANSI = (int)'\r';
+                lpchANSI++;
+                *lpchANSI = (int)'\n';
+                lpchANSI++;
+                lpchANSI = strchr(lpchANSI, (int)'\n');
+            }
+        }
+        break;
+        case IDM_EXIT:
+            DestroyWindow(hWnd);
+            break;
+        default: return DefWindowProc(hWnd, message, wParam, lParam);
+        }
+    }
+    break;
+    case WM_PAINT:
+    {
+        PAINTSTRUCT ps;
+        HDC hdc = BeginPaint(hWnd, &ps);
+        EndPaint(hWnd, &ps);
+    }
+    break;
+    case WM_DESTROY:
+        PostQuitMessage(0);
+        break;
+    default:
+        return DefWindowProc(hWnd, message, wParam, lParam);
+    }
+    return 0;
+}
